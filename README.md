@@ -1,106 +1,219 @@
-# Searcharr
-[![Docker Pulls](https://img.shields.io/docker/pulls/toddrob/searcharr?style=plastic)](https://hub.docker.com/r/toddrob/searcharr) [![release](https://github.com/toddrob99/searcharr/actions/workflows/release.yml/badge.svg)](https://github.com/toddrob99/searcharr/actions/workflows/release.yml) [![beta](https://github.com/toddrob99/searcharr/actions/workflows/beta.yml/badge.svg?branch=beta)](https://github.com/toddrob99/searcharr/actions/workflows/beta.yml)
-### Sonarr & Radarr Telegram Bot
-### By Todd Roberts
-https://github.com/toddrob99/searcharr
+# Alfred
 
-This bot allows users to add movies to Radarr and series to Sonarr via Telegram messaging app.
+An opinionated fork of [Searcharr](https://github.com/toddrob99/searcharr) that
+acts as a Telegram butler for Sonarr and Radarr.
 
-## Alfred customizations
+Alfred lets authenticated Telegram users search for and add movies or TV shows,
+automatically routes series and anime to their correct Sonarr folders, reports
+new additions to an administrator chat, and can restart its own container.
 
-This fork adds the following household refinements:
+## What changed in this fork
 
-* `/reset` restarts only the Searcharr container and replies with randomized
-  Alfred-style messages. The container must use an `always` or
-  `unless-stopped` restart policy.
-* Standard series are automatically stored in `/tv/Series`; the **Add as
-  Anime** action uses `/tv/Anime`. Both paths must exist as Sonarr root folders.
-* Series and movies are added without tag prompts or tags.
-* Successful additions can be reported to an administrator chat using the
-  requester's Telegram display name.
+- `/reset` restarts only Alfred's Searcharr container and sends randomized,
+  mildly humorous Alfred-style messages before and after the restart.
+- Regular authenticated users and administrators can run `/reset`.
+- Standard TV series are automatically stored in `/tv/Series`.
+- The **Add as Anime** action automatically stores anime in `/tv/Anime` and
+  submits it to Sonarr with the anime series type.
+- `/notSparta/` is never presented as a series destination.
+- Series and movies are added without selectable, username, or forced tags.
+- Successful movie and series additions can be reported to a configured admin
+  chat using the requester's Telegram display name.
+- `/setadminchat` lets an authenticated administrator choose the reporting
+  chat.
 
-An authenticated administrator registers the current reporting chat with:
+## Commands
+
+| Command | Access | Purpose |
+| --- | --- | --- |
+| `/start <password>` | Everyone | Authenticate as a regular user or administrator. |
+| `/help` | Authenticated users | Show the available Searcharr commands. |
+| `/series <title>` | Authenticated users | Search Sonarr for a TV series. |
+| `/movie <title>` | Authenticated users | Search Radarr for a movie. |
+| `/reset` | Authenticated users | Restart only the Alfred/Searcharr container. |
+| `/users` | Administrators | Manage authenticated users and admin access. |
+| `/setadminchat` | Administrators | Send addition reports to the current chat. |
+| `/setadminchat <chat_id>` | Administrators | Send addition reports to another chat ID. |
+
+Command aliases for the standard Searcharr commands remain configurable in
+`data/settings.py`.
+
+## Requirements
+
+- Docker with an `always` or `unless-stopped` restart policy for `/reset`
+- A Telegram bot token from [BotFather](https://core.telegram.org/bots#6-botfather)
+- Sonarr with both `/tv/Series` and `/tv/Anime` configured as root folders
+- Radarr
+- API keys for Sonarr and Radarr
+
+The two Sonarr paths are deliberately fixed by this fork. Alfred refuses the
+addition if its required destination is unavailable rather than silently using
+the wrong folder.
+
+## Configuration
+
+Copy the sample settings file:
+
+```sh
+mkdir -p data logs
+cp settings-sample.py data/settings.py
+```
+
+At minimum, configure these values in `data/settings.py`:
+
+```python
+searcharr_password = "regular-user-password"
+searcharr_admin_password = "administrator-password"
+tgram_token = "telegram-bot-token"
+
+sonarr_url = "http://your-sonarr-host:8989"
+sonarr_api_key = "sonarr-api-key"
+sonarr_quality_profile_id = ["HD - 720p/1080p"]
+sonarr_series_paths = ["/tv/Series", "/tv/Anime"]
+
+radarr_url = "http://your-radarr-host:7878"
+radarr_api_key = "radarr-api-key"
+radarr_quality_profile_id = ["HD - 720p/1080p"]
+```
+
+Keep the following values disabled to preserve the no-tag workflow:
+
+```python
+sonarr_tag_with_username = False
+sonarr_forced_tags = []
+sonarr_allow_user_to_select_tags = False
+
+radarr_tag_with_username = False
+radarr_forced_tags = []
+radarr_allow_user_to_select_tags = False
+```
+
+Never commit `data/settings.py`. The repository ignores `data/`, `logs/`,
+databases, environment files, and settings files containing live credentials.
+
+## Build and run with Docker
+
+Build this repository locally. Do not deploy `toddrob/searcharr:latest`, because
+that upstream image does not contain Alfred's custom commands.
+
+```sh
+docker build -t alfred-searcharr:latest .
+```
+
+Use the locally built image in your Compose service:
+
+```yaml
+services:
+  searcharr:
+    container_name: searcharr
+    image: alfred-searcharr:latest
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Costa_Rica
+    restart: unless-stopped
+    network_mode: host
+```
+
+Then create or update the container:
+
+```sh
+docker compose up -d
+```
+
+After future code changes, rebuild and recreate it with:
+
+```sh
+docker build -t alfred-searcharr:latest .
+docker compose up -d --force-recreate
+```
+
+## Authentication
+
+Authenticate privately so passwords are not exposed in a group chat:
+
+```text
+/start <searcharr_password>
+```
+
+Administrators authenticate with:
+
+```text
+/start <searcharr_admin_password>
+```
+
+Do not send the administrator password in a group chat.
+
+## Adding media
+
+Search for a regular series:
+
+```text
+/series Slow Horses
+```
+
+Selecting **Add Series** stores it in `/tv/Series`. When a search result is
+recognized as anime, selecting **Add as Anime** stores it in `/tv/Anime`.
+Neither workflow asks the user to select a path or tags. A quality-profile or
+season-monitoring prompt may still appear when enabled in the settings.
+
+Search for a movie:
+
+```text
+/movie The Dark Knight
+```
+
+Movies retain the configured Radarr path and quality-profile workflow, but no
+tag prompt appears and the movie is submitted without tags.
+
+## Admin addition reports
+
+Add Alfred to the destination chat, authenticate your Telegram user as a
+Searcharr administrator, and send this command inside that chat:
 
 ```text
 /setadminchat
 ```
 
-Alternatively, add the bot to another chat and register its numeric ID:
+To configure a different chat by numeric ID:
 
 ```text
-/setadminchat <chat_id>
+/setadminchat -1001234567890
 ```
 
-## Setup & Run
+Alfred verifies that it can message the destination before saving it. Reports
+are stored in `data/admin_chat.json` and survive container restarts. A successful
+addition produces a message similar to:
 
-### Configure
+```text
+Bruce Wayne added The Dark Knight movie.
+```
 
-Copy `settings-sample.py` to `data/settings.py`, and edit the settings within the file as necessary.
+If no admin chat is configured, additions continue normally and only the report
+is skipped.
 
-> **Upgrading from an earlier version?** Searcharr will automatically copy your existing root `settings.py` into `data/` on first run. After confirming everything works, you can remove the old root `settings.py` volume mapping from your `docker-compose.yml`.
+## Reset behavior
 
-Detailed descriptions of the available settings are available on the [wiki](https://github.com/toddrob99/searcharr/wiki/Configuration-::-settings.py). 
+`/reset` writes the requesting chat ID into the persistent `data/` volume,
+sends a random Alfred-style acknowledgement, and terminates only the Searcharr
+process. Docker restarts that container because of its restart policy. Once the
+new process initializes, it sends a random completion message to the requesting
+chat.
 
-You are required to update the following settings, at minimum:
+It does **not** restart Sonarr, Radarr, Docker, or the host machine.
 
-* Searcharr Bot > Password
-* Telegram Bot > Token (see [Telegram Bot Setup Instructions](https://core.telegram.org/bots#6-botfather))
-* Sonarr > URL, API Key, Quality Profile ID
-* Radarr > URL, API Key, Quality Profile ID
+## Run from source
 
-### Docker & Docker-Compose
+Install the dependencies and run the bot from the repository root:
 
-Docker is the suggested method to run Searcharr. Be sure to map the following in your Docker container:
+```sh
+python3 -m pip install -r requirements.txt
+python3 searcharr.py
+```
 
-* Data folder (settings + database) to /app/data
-* Log folder to /app/logs
+## Credits
 
-A docker-compose.yml file is provided for your convenience. Update the volume mappings listed above, and then run `docker-compose up -d` to start Searcharr.
-
-### Run from Source
-
-If running from source, use Python 3.8.3+, install requirements using `python -m pip install -r requirements.txt`, and then run `searcharr.py`.
-
-## Use
-
-### Authenticate
-
-Send a private message to your bot saying `/start <password>` where `<password>` is the value of `searcharr_password` in `settings.py`. For admin access, instead say `/start <admin_password>` where `<admin_password>` is the value of `searcharr_admin_password` in `settings.py`. An authenticated user can add admin access by re-authenticating using the admin password. Re-authenticating with the non-admin password will not remove a user's admin access. Admin access must be removed by an admin using the `/users` command, or manually in the database.
-
-**Caution**: Authentication via `/start` command will work in a group chat, but then everyone else in the group will see the password. If not all group members should be allowed to use the bot, then be sure to authenticate in a private message.
-
-**Double Caution**: Do not authenticate as an admin in a group chat. Always use a private message with your bot.
-
-### Search & Add a Series to Sonar or a Movie to Radarr
-
-Send the bot a (private or group) message saying `/series <title>` or `/movie <title>` (replace with custom command aliases, as configured in `settings.py`). The bot will reply with information about the first result, along with buttons to move forward and back within the search results, pop out to tvdb, TMDB, or IMDb, add the current series/movie to Sonarr/Radarr, or cancel the search. When you click the button to add the series/movie to Sonarr/Radarr, the bot will ask what root folder to put the series/movie in, then what quality profile to use--unless you have only one root folder or quality profile enabled in Searcharr settings, in which case it will skip those steps and add the series/movie straight away.
-
-### Manage Users
-
-If you are authenticated as an admin, you can use the `/users` command to retrieve a list of users with buttons to remove all access and add/remove admin access (as applicable).
-
-## Screenshots
-
-Authenticate by saying `/start <password>` (or `/start@bot_username <password>` in a group with multiple bots)
-
-![Authenticate](https://github.com/toddrob99/searcharr/blob/main/screenshots/authenticate.png?raw=true)
-
-Search for movie using `/movie <title>` or series using `/series <title>` (behavior is the same for series and movies) (use custom commands configured in `settings.py` if applicable). Buttons will appear to open the series/movie info in tvdb, IMDb, or TVDB when those ids are available.
-
-![Search Result](https://github.com/toddrob99/searcharr/blob/main/screenshots/add.png?raw=true)
-
-If series/movie already exists in Sonarr/Radarr, the Add button will instead say "Already Added!":
-
-![Already Exists](https://github.com/toddrob99/searcharr/blob/main/screenshots/already-exists.png?raw=true)
-
-If Searcharr has multiple root folders configured, you will be prompted to select a root folder:
-
-![Choose Root Folder](https://github.com/toddrob99/searcharr/blob/main/screenshots/choose-root-folder.png?raw=true)
-
-If Searcharr has multiple quality profiles configured, you will be prompted to select a root folder after selecting a quality profile:
-
-![Choose Quality Profile](https://github.com/toddrob99/searcharr/blob/main/screenshots/choose-quality-profile.png?raw=true)
-
-When the series/movie has been added, or you click Cancel, the search results will be removed:
-
-![Added](https://github.com/toddrob99/searcharr/blob/main/screenshots/added.png?raw=true)
+Alfred is based on [Searcharr](https://github.com/toddrob99/searcharr), created
+by Todd Roberts. The original project documentation and configuration reference
+are available in the [Searcharr wiki](https://github.com/toddrob99/searcharr/wiki).
