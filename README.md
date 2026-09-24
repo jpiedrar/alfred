@@ -6,6 +6,31 @@ https://github.com/toddrob99/searcharr
 
 This bot allows users to add movies to Radarr and series to Sonarr via Telegram messaging app.
 
+## Alfred customizations
+
+This fork adds the following household refinements:
+
+* `/reset` restarts only the Searcharr container and replies with randomized
+  Alfred-style messages. The container must use an `always` or
+  `unless-stopped` restart policy.
+* Standard series are automatically stored in `/tv/Series`; the **Add as
+  Anime** action uses `/tv/Anime`. Both paths must exist as Sonarr root folders.
+* Series and movies are added without tag prompts or tags.
+* Successful additions can be reported to an administrator chat using the
+  requester's Telegram display name.
+
+An authenticated administrator registers the current reporting chat with:
+
+```text
+/setadminchat
+```
+
+Alternatively, add the bot to another chat and register its numeric ID:
+
+```text
+/setadminchat <chat_id>
+```
+
 ## Setup & Run
 
 ### Configure

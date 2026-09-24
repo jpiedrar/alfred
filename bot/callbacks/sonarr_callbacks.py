@@ -1,114 +1,94 @@
-"""
-Searcharr
-Sonarr & Radarr Telegram Bot
-Sonarr-Specific Callback Handlers
-By Todd Roberts
-https://github.com/toddrob99/searcharr
-"""
-from bot.utils.conversation import get_add_data, update_add_data, delete_conversation
-from bot.utils.formatting import prepare_response
-from bot.utils.text import translate
-from bot.utils.log import set_up_logger
+"""Customized Sonarr callbacks with automatic Series/Anime destinations."""
+
 from bot.callbacks.base import (
-    handle_navigation,
-    handle_cancel,
-    check_path_selection,
     check_quality_selection,
-    handle_tag_selection,
-    process_tags,
-    update_media_message
+    handle_cancel,
+    handle_navigation,
+    update_media_message,
 )
+from bot.utils.conversation import (
+    delete_conversation,
+    get_add_data,
+    update_add_data,
+)
+from bot.utils.admin_notifications import report_addition
+from bot.utils.formatting import prepare_response
+from bot.utils.log import set_up_logger
+from bot.utils.text import translate
 import settings
 
-logger = set_up_logger("callbacks.sonarr")
 
-# Create a config object for Sonarr-specific settings
+logger = set_up_logger("callbacks.sonarr")
+SERIES_PATH = "/tv/Series"
+ANIME_PATH = "/tv/Anime"
+
 SONARR_CONFIG = {
-    "tag_with_username": settings.sonarr_tag_with_username,
-    "forced_tags": settings.sonarr_forced_tags,
-    "allow_user_to_select_tags": settings.sonarr_allow_user_to_select_tags,
-    "user_selectable_tags": settings.sonarr_user_selectable_tags,
     "add_monitored": settings.sonarr_add_monitored,
     "search_on_add": settings.sonarr_search_on_add,
-    "season_monitor_prompt": settings.sonarr_season_monitor_prompt
+    "season_monitor_prompt": settings.sonarr_season_monitor_prompt,
 }
 
 
 async def handle_sonarr_callback(update, context, bot, convo, cid, i, op, op_flags):
-    """Handle callbacks related to Sonarr (series).
-    
-    Args:
-        update: The update with the callback query
-        context: The callback context
-        bot: The SearcharrBot instance
-        convo: The conversation data
-        cid: The conversation ID
-        i: The current index
-        op: The operation
-        op_flags: Additional operation flags
-    """
+    """Route Sonarr callback operations."""
     query = update.callback_query
-    
-    # Handle operations
+
     if op == "add":
         await handle_add_series(update, context, bot, convo, cid, i, op_flags)
-    elif op == "prev" or op == "next":
+    elif op in ("prev", "next"):
         await handle_navigation(update, context, "series", convo, cid, i, op)
-    elif op == "cancel" or op == "done":
+    elif op in ("cancel", "done"):
         await handle_cancel(update, context, convo, cid, i, op)
     else:
-        # Default action for unrecognized operations
         await query.answer()
 
 
 async def handle_add_series(update, context, bot, convo, cid, i, op_flags):
-    """Handle adding a series to Sonarr.
-    
-    Args:
-        update: The update with the callback query
-        context: The callback context
-        bot: The SearcharrBot instance
-        convo: The conversation data
-        cid: The conversation ID
-        i: The current index
-        op_flags: Additional operation flags
-    """
+    """Collect non-path choices and add a series to its fixed destination."""
     query = update.callback_query
     service = bot.sonarr
-    
-    # Get the series result
-    r = convo["results"][i]
-    
-    # If we have flags, process them first
+    result = convo["results"][i]
+
     if op_flags:
-        for k, v in op_flags.items():
-            logger.debug(f"Adding/Updating additional data for cid=[{cid}], key=[{k}], value=[{v}]...")
-            update_add_data(cid, k, v)
-        
-        # If this is a tag selection, handle it and return
-        if op_flags.get("tt") or op_flags.get("td"):
-            handled = await handle_tag_selection(update, context, service, SONARR_CONFIG, convo, cid, i, op_flags)
-            if handled:
-                return
-    
-    # Get the additional data that has been collected so far
+        for key, value in op_flags.items():
+            logger.debug(
+                "Adding/Updating additional data for cid=[%s], key=[%s], value=[%s]...",
+                cid,
+                key,
+                value,
+            )
+            update_add_data(cid, key, value)
+
+    # The normal Add action is a standard series; the existing Add as Anime
+    # action supplies st=a. Never derive or accept a root path from the user.
     additional_data = get_add_data(cid)
-    logger.debug(f"Additional data: {additional_data}")
-    
-    # Step 1: Check for root folder selection
-    if not await check_path_selection(update, context, service, "series", convo, cid, i):
+    destination = ANIME_PATH if additional_data.get("st") == "a" else SERIES_PATH
+    configured_paths = {folder["path"] for folder in service._root_folders}
+    if destination not in configured_paths:
+        logger.error("Required Sonarr root folder is unavailable: [%s]", destination)
+        delete_conversation(cid)
+        await query.message.reply_text(
+            f"The configured Sonarr folder {destination} is unavailable."
+        )
+        await query.message.delete()
+        await query.answer()
         return
-    
-    # Step 2: Check for quality profile selection
-    if not await check_quality_selection(update, context, service, "series", convo, cid, i):
+
+    update_add_data(cid, "p", destination)
+    # Explicitly submit an empty tag list. No selectable, username, or forced
+    # tags are processed for series.
+    update_add_data(cid, "t", "")
+
+    if not await check_quality_selection(
+        update, context, service, "series", convo, cid, i
+    ):
         return
-    
-    # Step 3: Check for season monitor options
+
+    additional_data = get_add_data(cid)
     if (
         SONARR_CONFIG["season_monitor_prompt"]
         and additional_data.get("m", False) is False
     ):
-        # Need to prompt user to select season monitoring option
         monitor_options = [
             translate("all_seasons"),
             translate("first_season"),
@@ -116,7 +96,7 @@ async def handle_add_series(update, context, bot, convo, cid, i, op_flags):
         ]
         reply_message, reply_markup = prepare_response(
             "series",
-            r,
+            result,
             cid,
             i,
             len(convo["results"]),
@@ -124,71 +104,32 @@ async def handle_add_series(update, context, bot, convo, cid, i, op_flags):
             monitor_options=monitor_options,
         )
         await update_media_message(
-                query.message,
-                r["remotePoster"],
-                caption=reply_message,
-                reply_markup=reply_markup
-            )
+            query.message,
+            result["remotePoster"],
+            caption=reply_message,
+            reply_markup=reply_markup,
+        )
         await query.answer()
         return
-    
-    # Step 4: Check for tag selection
-    if SONARR_CONFIG["allow_user_to_select_tags"] and not additional_data.get("td"):
-        all_tags = service.get_filtered_tags(
-            SONARR_CONFIG["user_selectable_tags"],
-            SONARR_CONFIG["forced_tags"],
-        )
-        
-        if not all_tags:
-            logger.warning(
-                "User tagging is enabled, but no tags found. Make sure there are tags in Sonarr matching your Searcharr configuration."
-            )
-        elif not additional_data.get("tt"):
-            # Need to prompt user to select tags
-            reply_message, reply_markup = prepare_response(
-                "series",
-                r,
-                cid,
-                i,
-                len(convo["results"]),
-                add=True,
-                tags=all_tags,
-            )
-            await update_media_message(
-                query.message,
-                r["remotePoster"],
-                caption=reply_message,
-                reply_markup=reply_markup
-            )
-            await query.answer()
-            return
-    
-    # Step 5: Process tags (username tag and forced tags)
-    await process_tags(service, SONARR_CONFIG, cid, query.from_user)
-    
-    # Step 6: All data collected, add the series
-    logger.debug("All data is accounted for, proceeding to add...")
+
+    logger.debug("All data is accounted for, proceeding to add to [%s]", destination)
     try:
         added = service.add_series(
-            series_info=r,
+            series_info=result,
             monitored=SONARR_CONFIG["add_monitored"],
             search=SONARR_CONFIG["search_on_add"],
             additional_data=get_add_data(cid),
         )
-    except Exception as e:
-        logger.error(f"Error adding series: {e}")
+    except Exception as error:
+        logger.error("Error adding series: %s", error)
         added = False
-    
-    logger.debug(f"Result of attempt to add series: {added}")
-    
-    # Step 7: Handle the result
+
     if added:
         delete_conversation(cid)
-        await query.message.reply_text(translate("added", title=r["title"]))
+        await query.message.reply_text(translate("added", title=result["title"]))
+        await report_addition(context.bot, query.from_user, result["title"], "series")
         await query.message.delete()
     else:
-        await query.message.reply_text(
-            translate("unknown_error_adding", kind="series")
-        )
-    
+        await query.message.reply_text(translate("unknown_error_adding", kind="series"))
+
     await query.answer()

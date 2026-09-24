@@ -23,12 +23,12 @@ sonarr_api_key = ""
 sonarr_quality_profile_id = ["HD - 720p/1080p"]  # can be name or id value - include multiple to allow the user to choose
 sonarr_add_monitored = True
 sonarr_search_on_add = True
-sonarr_tag_with_username = True
+sonarr_tag_with_username = False
 sonarr_forced_tags = []  # e.g. ["searcharr", "friends-and-family"] - leave empty for none
-sonarr_allow_user_to_select_tags = True
+sonarr_allow_user_to_select_tags = False
 sonarr_user_selectable_tags = []  # e.g. ["custom-tag-1", "custom-tag-2"] - leave empty to let user choose from all tags in Sonarr
 sonarr_series_command_aliases = ["series"]  # e.g. ["series", "tv", "t"]
-sonarr_series_paths = []  # e.g. ["/tv", "/anime"] - can be full path or id value - leave empty to enable all
+sonarr_series_paths = ["/tv/Series", "/tv/Anime"]  # Required automatic destinations
 sonarr_season_monitor_prompt = False  # False - always monitor all seasons; True - prompt user to select from All, First, or Latest season(s)
 
 # Radarr
@@ -38,9 +38,9 @@ radarr_api_key = ""
 radarr_quality_profile_id = ["HD - 720p/1080p"]  # can be name or id value - include multiple to allow the user to choose
 radarr_add_monitored = True
 radarr_search_on_add = True
-radarr_tag_with_username = True
+radarr_tag_with_username = False
 radarr_forced_tags = []  # e.g. ["searcharr", "friends-and-family"] - leave empty for none
-radarr_allow_user_to_select_tags = True
+radarr_allow_user_to_select_tags = False
 radarr_user_selectable_tags = []  # e.g. ["custom-tag-1", "custom-tag-2"] - leave empty to let user choose from all tags in Radarr
 radarr_min_availability = "released"  # options: "announced", "inCinemas", "released"
 radarr_movie_command_aliases = ["movie"]  # e.g. ["movie", "mv", "m"]
